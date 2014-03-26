@@ -1,4 +1,5 @@
 === WP-DB-Table-Editor ===
+
 Contributers: bobbysmith007
 Donate link: https://www.acceleration.net/programming/donate-to-acceleration-net/
 Tags: admin screens, database, editor
@@ -14,6 +15,7 @@ tables in your Wordpress database.  It's goals are to provide useful,
 simple, flexible database table admin screens.
 
 It supports:
+
  * one table per admin screen, as many admin screens as desired
   * These are organized under a new "DB Table Editor" menu item
  * excel spreadsheet like interface using SlickGrid
