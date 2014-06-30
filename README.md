@@ -79,6 +79,12 @@ This supports `wp_parse_args` style arguments.
  * `columnFilters`: Default column filters, this is an array of column->val
    to be applied as default column fitlers when the page is loaded
  * `columnNameMap`: A map of actual column names to displayed label
+ * `noedit_columns`, `hide_columns`: You may wish to hide some columns
+   or prevent edit.  You may do so by setting these fields to the name
+   of columns you wish hidden or uneditable (eg: the id)
+ * `insert_cb`,`update_cb`, `delete_cb`: function names to be called with
+   the dbte, update array, column array and modified indexes array
+   `call_user_func($cur->insert_cb,$cur, $up, $cols, $idxs);`
 
 Example:
 ```
@@ -94,12 +100,21 @@ if(function_exists('add_db_table_editor')){
 }
 ```
 
+== Adding an Interface on the fly ==
+
+If we go to look up a database table editor and we dont find it, but
+there is a function named dbte_create_$tbl that matches, we will call
+that function expecting it to return a dbte instance. This is useful
+in situations where we may not have the data for a table editor in all
+circumstances (EG: not every page has a member id, so only do it on
+that particular page).
+
+
 = Hooks / Actions =
 
  * `db-table-editor_enqueue_scripts` is an action that will be called
    after enqueueing all plugin scripts and before enqueueing `jsFile`
    (if it exists)
-
 ```
 function dbTableEditorScripts(){
   wp_register_script('employee-table-extensions-js',
@@ -121,4 +136,4 @@ page.  Please use with care.
 == Caveats ==
  * Dont put an editable table editor on your public facing screens using the shortcode!
  * Database tables are expected to have a column names `id` that is
-   the primary key
+   the primary key, if they dont, better gin something up, so that we can pretend

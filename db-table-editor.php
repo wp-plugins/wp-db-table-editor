@@ -61,7 +61,7 @@ function dbte_get_data_table(){
   if(!is_a($data, "DBTE_DataTable")) echo "DB-Table-Editor Cannot READ DATA SOURCE";
   $rows = $data->rows;
   $columns = $data->columns;
-  return json_encode(Array('columns'=>$columns, 'rows'=>$rows));
+  return Array('columns'=>$columns, 'rows'=>$rows);
 }
 
 /*
@@ -140,8 +140,13 @@ function dbte_current($tbl=null){
   global $DBTE_CURRENT, $DBTE_INSTANCES;
   $cur = $DBTE_CURRENT;
   if($cur && ($cur->id == $tbl || !$tbl)) return $cur;
-  if($tbl) foreach($DBTE_INSTANCES as $o){
-    if($tbl == $o->id) $cur = $DBTE_CURRENT = $o;
+  if($tbl){
+    foreach($DBTE_INSTANCES as $o){
+      if($tbl == $o->id) $cur = $DBTE_CURRENT = $o;
+    }
+    if(!$cur && function_exists('dbte_create_'.$tbl)){
+      $cur = $DBTE_CURRENT = call_user_func('dbte_create_'.$tbl);
+    }
   }
   return $cur;
 }
@@ -187,10 +192,18 @@ function dbte_render($id=null){
     <button onclick="DBTableEditor.undo();"><img src="$base/assets/images/arrow_undo.png" align="absmiddle">Undo</button>
 EOT;
   }
-  $noedit = $noedit ? "true" : "false";
-  $data = dbte_get_data_table();
-  $columnFiltersJson = json_encode($cur->columnFilters);
-  $columnNameMap = json_encode($cur->columnNameMap);
+  $args = Array(
+    "table"=>$cur->id,
+    "baseUrl"=>$base,
+    "noedit"=> $noedit,
+    "data"=>dbte_get_data_table(),
+    "columnFilters"=> $cur->columnFilters,
+    "columnNameMap" => $cur->columnNameMap,
+    "hide_columns"=>$cur->hide_columns,
+    "noedit_columns"=>$cur->noedit_columns,
+    "default_values"=>$cur->default_values,
+  );
+  $json = json_encode($args);
   $o = <<<EOT
   <div class="dbte-page">
     <h1>$cur->title</h1>
@@ -206,8 +219,7 @@ EOT;
     <div class="db-table-editor"></div>
     <script type="text/javascript">
 jQuery(function(){
-    DBTableEditor.onload({'table':"$cur->id", "baseUrl":"$base", 'noedit':$noedit,
-          "data": $data, "columnFilters":$columnFiltersJson, "columnNameMap":$columnNameMap});
+    DBTableEditor.onload($json);
 });
 
 if(window.addEventListener)
@@ -232,11 +244,17 @@ function dbte_menu(){
   $ico = plugins_url('wp-db-table-editor/assets/images/database_edit.png');
   add_menu_page('DB Table Editor', 'DB Table Editor', 'read', 'wp-db-table-editor',
                 'dbte_main_page', $ico, 50);
+
+  $displayed = 0;
   foreach($DBTE_INSTANCES as $o){
     $cap = $o->cap;
     // shouldnt be null, but lets be defensive
     if(!$cap) $cap = 'edit_others_posts';
+    if(current_user_can($cap)) $displayed++;
     add_submenu_page('wp-db-table-editor', $o->title, $o->title, $cap, 'dbte_'.$o->id, 'echo_dbte_render' );
+  }
+  if(!$displayed){
+    remove_menu_page('wp-db-table-editor');
   }
 
 }
@@ -263,7 +281,11 @@ function dbte_main_page(){
 
 EOT;
   foreach($DBTE_INSTANCES as $o){
-    echo "<li><a href=\"admin.php?page=dbte_$o->id\">$o->title</a></li>";
+    $cap = $o->cap;
+    // shouldnt be null, but lets be defensive
+    if(!$cap) $cap = 'edit_others_posts';
+    if(current_user_can($cap))
+      echo "<li><a href=\"admin.php?page=dbte_$o->id\">$o->title</a></li>";
   }
   echo "</ul>";
 }
@@ -284,8 +306,9 @@ function dbte_save_cb() {
 
 
   //var_dump($d);die();
-  $cols = $d["columns"];
-  $rows = $d["rows"];
+  $cols = @$d["columns"];
+  $rows = @$d["rows"];
+  $idxs = @$d["modifiedIdxs"];
   $len = count($cols);
 
   $idIdx = 0; 
@@ -296,6 +319,7 @@ function dbte_save_cb() {
   }
   // echo "id: $idIdx, "; print_r($rows);
   $i=0;
+  $ridx = 0;
   $new_ids = Array();
   foreach($rows as $r){
     $id=@$r[$idIdx];
@@ -306,13 +330,24 @@ function dbte_save_cb() {
       }
     }
     if($id != null){
-      $where = array('id'=>$id);
-      $wpdb->update($cur->table, $up , $where);
+      if($cur->update_cb){
+        call_user_func($cur->update_cb,$cur, $up, $cols, $idxs[$ridx]);
+      }
+      else{
+        $where = array('id'=>$id);
+        $wpdb->update($cur->table, $up , $where);
+      }
     }
     else{
-      $wpdb->insert($cur->table, $up);
-      $new_ids[] = Array('rowId'=>$r["id"], 'dbid'=>$wpdb->insert_id);
+      if($cur->insert_cb){
+        call_user_func($cur->insert_cb,$cur, $up, $cols, $idxs[$ridx]);
+      }
+      else{
+        $wpdb->insert($cur->table, $up);
+        $new_ids[] = Array('rowId'=>$r["id"], 'dbid'=>$wpdb->insert_id);
+      }
     }
+    $ridx++;
   }
   header('Content-type: application/json');
   echo json_encode($new_ids);
@@ -329,7 +364,12 @@ function dbte_delete_cb(){
   $cur = dbte_current($tbl);
   if(!$cur) return;
   if($cur->noedit || ($cur->editcap && !current_user_can($cur->editcap))) return;
-  $wpdb->delete($cur->table, array('id'=>$id));
+  if($cur->delete_cb){
+    call_user_func($cur->delete_cb,$cur);
+  }
+  else{
+    $wpdb->delete($cur->table, array('id'=>$id));
+  }
   header('Content-type: application/json');
   echo "{\"deleted\":$id}";
   die();

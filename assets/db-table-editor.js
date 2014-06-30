@@ -1,6 +1,15 @@
 if(typeof(console)=='undefined')console={log:function(){}};
 if(typeof(DBTableEditor)=='undefined') DBTableEditor={};
-
+DBTableEditor.parseQuery = function(query) {
+    var obj = {};
+    if(!query || query.length < 1) return obj;
+    var vars = query.split('&');
+    for (var i = 0; i < vars.length; i++) {
+      var pair = vars[i].split('=');
+      obj[decodeURIComponent(pair[0])]=decodeURIComponent(pair[1]);
+    }
+    return obj;
+};
 DBTableEditor.commandQueue =[];
 DBTableEditor.queueAndExecuteCommand = function(item, column, editCommand){
   DBTableEditor.commandQueue.push(editCommand);
@@ -42,16 +51,22 @@ DBTableEditor.save = function(){
   jQuery('button.save img').attr('src',src.replace('accept.png','loading.gif'));
 
   // the last time we modified a row should contain all the final modifications
-  var h = {},i,r, toSave=[], mod = DBTableEditor.modifiedRows.slice(0);
+  var it,h = {},i,r, toSave=[], mod = DBTableEditor.modifiedRows.slice(0), modified;
   while(( r = mod.pop() )){
-    if(h[r.item.id]) continue;
-    h[r.item.id] = true;
+    // cells have a delete idx to be removed
+    if((it = h[r.item.id])){
+      it.modifiedIdxs.push(r.cell-1);
+      continue;
+    }
+    r.item.modifiedIdxs = [r.cell-1];
+    h[r.item.id] = r.item;
     toSave.push(r.item);
   }
   //console.log(toSave);
   var cols = DBTableEditor.data.columns.map(function(c){return c.originalName;});
   cols.shift(); // remove buttons
   var toSend = JSON.stringify({
+    modifiedIdxs:toSave.map(function(it){return it.modifiedIdxs;}),
     columns:cols,
     rows:toSave
   });
@@ -106,11 +121,20 @@ DBTableEditor.deleteHandler = function(el){
   var btn = jQuery(el);
   var id = btn.data('id');
   var rowid = btn.data('rowid');
+  var row = DBTableEditor.dataView.getItemById(rowid);
+  var rObj = {};
   btn.parents('.slick-row').addClass('active');
   if(!id) return;
   if(!btn.is('button'))btn = btn.parents('button');
   if (!confirm('Are you sure you wish to remove this row')) return;
-  jQuery.post(ajaxurl, {action:'dbte_delete', dataid:id, rowid:rowid, table:DBTableEditor.table})
+
+  // we have an empty column first for delete buttons
+  for(var i=0,c=null,v=null;c=DBTableEditor.data.columns[i+1];i++)
+    rObj[c.originalName]=row[i];
+
+  var reqArgs = jQuery.extend({action:'dbte_delete', dataid:id, rowid:rowid, table:DBTableEditor.table}, rObj);
+  console.log(rObj, reqArgs);
+  jQuery.post(ajaxurl, reqArgs)
    .success(function(data){DBTableEditor.deleteSuccess(data, id, rowid);})
    .error(DBTableEditor.deleteFail);
   return false;
@@ -136,7 +160,11 @@ DBTableEditor.exportCSV = function(){
   var url = jQuery(DBTableEditor.grid.getHeaderRow())
    .find(':input').filter(function(){return jQuery(this).val().length>0;})
    .serialize();
-  var url = ajaxurl+'?action=dbte_export_csv&table='+DBTableEditor.table+'&'+url;
+  var args=jQuery.extend({}, DBTableEditor.query, DBTableEditor.hashQuery);
+  delete(args["page"]);
+  var url = ajaxurl+'?action=dbte_export_csv&table='+DBTableEditor.table
+   +'&'+jQuery.param(args)
+   +'&'+url;
   console.log('Redirecting to export:', url);
   window.location=url;
 };
@@ -180,12 +208,20 @@ DBTableEditor.addPendingSave = function(args){
 
 DBTableEditor.onload = function(opts){
   //console.log('Loading db table');
+  DBTableEditor.query = DBTableEditor.parseQuery(window.location.search.substring(1));
+  DBTableEditor.hashQuery = DBTableEditor.parseQuery(window.location.hash.substring(1));
+
   jQuery.extend(DBTableEditor, opts);
   if(!DBTableEditor.data){ return console.log("No Data for DBTableEditor");}
   var rows = DBTableEditor.data.rows;
   var columns = DBTableEditor.data.columns;
   var columnMap = DBTableEditor.columnMap = {};
   DBTableEditor.columnNameMap = DBTableEditor.columnNameMap||{};
+  if(typeof(DBTableEditor.noedit_columns)=="string")
+    DBTableEditor.noedit_columns = DBTableEditor.noedit_columns.split(/\s*,\s*/);
+  if(typeof(DBTableEditor.hide_columns)=="string")
+    DBTableEditor.hide_columns = DBTableEditor.hide_columns.split(/\s*,\s*/);
+  DBTableEditor.default_values = DBTableEditor.parseQuery(opts.default_values);
 
   // init columns
   for( var i=0, c ; c=columns[i] ; i++){
@@ -199,6 +235,15 @@ DBTableEditor.onload = function(opts){
     }
     c.field = i;
     c.sortable = true;
+    if(jQuery.inArray(c.originalName, DBTableEditor.hide_columns)>-1){
+      c.maxWidth=c.minWidth=c.width=5;
+      c.resizable=c.selectable=c.focusable=false;
+    }
+    if(jQuery.inArray(c.originalName, DBTableEditor.noedit_columns)>-1){
+      c.focusable=false;
+      c.selectable=false;
+      c.cannotTriggerInsert=true;
+    }
     //account for buttons column at 0 if needed
     columnMap[c.id] = i; //DBTableEditor.noedit ? i : i+1;
 
@@ -244,7 +289,9 @@ DBTableEditor.onload = function(opts){
     defaultColumnWidth:120,
     explicitInitialization: true
   };
-  DBTableEditor.columnFilters = DBTableEditor.columnFilters || {};
+
+  DBTableEditor.columnFilters = jQuery.extend(DBTableEditor.columnFilters,DBTableEditor.query,DBTableEditor.hashQuery);
+  delete(DBTableEditor.columnFilters["page"]);
   var dataView = DBTableEditor.dataView = new Slick.Data.DataView({ inlineFilters: true });
   var grid = DBTableEditor.grid = new Slick.Grid('.db-table-editor', dataView, columns, options);
   grid.setSelectionModel(new Slick.CellSelectionModel());
@@ -262,6 +309,9 @@ DBTableEditor.onload = function(opts){
   DBTableEditor.clearPendingSaves();
   grid.onAddNewRow.subscribe(function (e, args) {
     var item = args.item;
+    jQuery.each(DBTableEditor.default_values,function(k,v){
+      item[DBTableEditor.columnMap[k]]=v;
+    });
     grid.invalidateRow(rows.length);
     item.id = DBTableEditor.newId();
     dataView.addItem(item);
