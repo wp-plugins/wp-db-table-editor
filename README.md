@@ -88,6 +88,7 @@ This supports `wp_parse_args` style arguments.
    `call_user_func($cur->insert_cb,$cur, $up, $cols, $idxs);`
 
 Example:
+(this can be added anywhere your themes, functions.php)
 ```
 if(function_exists('add_db_table_editor')){
   add_db_table_editor('title=Employees&table=employees');
