@@ -316,6 +316,8 @@ function dbte_save_cb() {
   $idxs = @$d["modifiedIdxs"];
   $len = count($cols);
   $id_col = $cur->id_column;
+  $no_edit_cols = $cur->noedit_columns;
+  if(is_string($no_edit_cols)) $no_edit_cols=explode(',',$no_edit_cols);
 
   $idIdx = 0; 
   $i=0;
@@ -336,6 +338,9 @@ function dbte_save_cb() {
         // dont pass empty strings
         if ($v) $up[$cols[$i]] = $v;
       }
+    }
+    foreach($no_edit_cols as $noedit){
+      unset($up[$noedit]);
     }
     if($id != null){
       if($cur->update_cb){
@@ -386,6 +391,40 @@ function dbte_delete_cb(){
 }
 add_action( 'wp_ajax_dbte_delete', 'dbte_delete_cb' );
 
+
+function dbte_is_date($ds){
+  $d = date_parse($ds);
+  if($d && !@$d['errors']) return $d;
+  return null;
+}
+
+// Here is an adaption of the above code that adds support for double
+// quotes inside a field. (One double quote is replaced with a pair of
+// double quotes per the CSV format). - http://php.net/manual/en/function.fputcsv.php
+function x8_fputcsv($filePointer,$dataArray,$delimiter,$enclosure){
+  // Write a line to a file
+  // $filePointer = the file resource to write to
+  // $dataArray = the data to write out
+  // $delimeter = the field separator
+  
+  // Build the string
+  $string = "";
+  
+  // No leading delimiter
+  $writeDelimiter = FALSE;
+  foreach($dataArray as $dataElement) {
+    // Replaces a double quote with two double quotes
+    $dataElement=str_replace($enclosure, $enclosure.$enclosure , $dataElement);
+    if($writeDelimiter) $string .= $delimiter;
+    $string .= $enclosure . $dataElement . $enclosure;
+    $writeDelimiter = TRUE;
+  }
+  
+  $string .= "\r\n";
+  // Write the string to the file
+  fwrite($filePointer,$string);
+}
+
 /*
  * Written as an ajax handler because that was easy, but we usually just link to here
  * will export filtered results using any filter-{columnname} request parameters provided
@@ -402,21 +441,22 @@ function dbte_export_csv(){
   foreach($_REQUEST as $k=>$v){
     if(strpos($k, "filter-")===0){
       $k = str_replace('filter-','', $k);
-      $wheres[] = $wpdb->prepare("$k LIKE %s", '%'.$v.'%');
+      if($cur->auto_date && dbte_is_date($v)) $wheres[] = $wpdb->prepare("$k = %s", $v);
+      else $wheres[] = $wpdb->prepare("$k LIKE %s", '%'.$v.'%');
       $filtered = true;
     }
   }
   $title = $cur->title;
   if($filtered) $title .= '-filtered';
-  header('Content-Type: application/excel');
-  header('Content-Disposition: attachment; filename="'.$title.'.csv"');
   $data = $cur->getData(array("where"=>$wheres));
   $columns = $data->columnNames;
   $rows = $data->rows;
+  header('Content-Type: application/excel');
+  header('Content-Disposition: attachment; filename="'.$title.'.csv"');
   $fp = fopen('php://output', 'w');
-  fputcsv($fp, $columns, ',', '"');
+  x8_fputcsv($fp, $columns, ',', '"');
   foreach ( $rows as $row ){
-    fputcsv($fp, $row, ',', '"');
+    x8_fputcsv($fp, $row, ',', '"');
   }
   fclose($fp);
   die();

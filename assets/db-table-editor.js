@@ -1,6 +1,13 @@
 if(typeof(console)=='undefined')console={log:function(){}};
 if(typeof(DBTableEditor)=='undefined') DBTableEditor={};
 
+// JS Extension Points
+/*
+ * DBTableEditor.getItemMetadata
+ * DBTableEditor.toLocaleDate
+ * DBTableEditor.dateFormats
+ */
+
 
 // based on https://github.com/brondavies/SlickGrid/commit/d5966858cd4f7591ba3da5789009b488ad05b021#diff-7f1ab5db3c0316e19a9ee635a1e2f2d0R1374
 DBTableEditor.defaultValueFormatter = function (row, cell, value, columnDef, dataContext) {
@@ -124,30 +131,29 @@ DBTableEditor.filterRow = function (item) {
       var c = grid.getColumns()[cidx];
       if(!c) continue;
       var filterVal = columnFilters[columnId];
-      if(filterVal && filterVal.length > 0){
-        // if we have a formatted value, lets check our value both formatted
-        // and unformatted against the search term both formatted and unformatted
-        // primarily to standardize dates currently
-        if( c.formatter ){
-          var re = new RegExp(filterVal,'i');
-          var val = item[c.field] && item[c.field].toString();
-          if( !val ) continue;
-          // row, cell, value, columnDef, dataContext
-          var formatted = c.formatter(item, cidx, val, c, null);
-          var formattedFilter = c.formatter(item, cidx, filterVal, c, null);
-          var reformattedFilter = new RegExp(formattedFilter,'i');
-          if ((val.search(re) < 0)
-              && (val.search(reformattedFilter) < 0)
-              && (formatted.search(re) < 0)
-              && (formatted.search(reformattedFilter) < 0)) {
-            return false;
-          }
+      var val = item[c.field] && item[c.field].toString();
+      if(!(filterVal && filterVal.length > 0) ) continue;
+      if( !val ) return false;
+      if( !c.formatter ){
+        var re = new RegExp(filterVal,'i');
+        if (val.search(re) < 0) {
+          return false;
         }
-        else{
-          var re = new RegExp(filterVal,'i');
-          if (item[c.field].toString().search(re) < 0) {
-            return false;
-          }
+      }
+      // if we have a formatted value, lets check our value both formatted
+      // and unformatted against the search term both formatted and unformatted
+      // primarily to standardize dates currently
+      else if( c.formatter ){
+        var re = new RegExp(filterVal,'i');
+        // row, cell, value, columnDef, dataContext
+        var formatted = c.formatter(item, cidx, val, c, null);
+        var formattedFilter = c.formatter(item, cidx, filterVal, c, null);
+        var reformattedFilter = new RegExp(formattedFilter,'i');
+        if ((val.search(re) < 0)
+            && (val.search(reformattedFilter) < 0)
+            && (formatted.search(re) < 0)
+            && (formatted.search(reformattedFilter) < 0)) {
+          return false;
         }
       }
     }
@@ -207,14 +213,20 @@ DBTableEditor.rowButtonFormatter = function(row, cell, value, columnDef, dataCon
 };
 
 DBTableEditor.exportCSV = function(){
-  var url = jQuery(DBTableEditor.grid.getHeaderRow())
-   .find(':input').filter(function(){return jQuery(this).val().length>0;})
-   .serialize();
   var args=jQuery.extend({}, DBTableEditor.query, DBTableEditor.hashQuery);
+  var cols = DBTableEditor.data.columns;
+  jQuery(DBTableEditor.grid.getHeaderRow())
+   .find(':input').each(function(i, el){
+     var $el = jQuery(el),name = $el.attr('name'), val = $el.val(), c = cols[i+1];
+     if(val.length>0){
+       if(c.isDate) args[name]=DBTableEditor.toISO8601(val);
+       else args[name]=val;
+     }
+   });
+
   delete(args["page"]);
   var url = ajaxurl+'?action=dbte_export_csv&table='+DBTableEditor.table
-   +'&'+jQuery.param(args)
-   +'&'+url;
+   +'&'+jQuery.param(args);
   console.log('Redirecting to export:', url);
   window.location=url;
 };
@@ -286,6 +298,7 @@ DBTableEditor.onload = function(opts){
   DBTableEditor.hashQuery = DBTableEditor.parseQuery(window.location.hash.substring(1));
 
   jQuery.extend(DBTableEditor, opts);
+  DBTableEditor.options = opts;
   if(!DBTableEditor.id_column) DBTableEditor.id_column='id';
   DBTableEditor.id_column = DBTableEditor.id_column.toLowerCase();
   if(!DBTableEditor.data){ return console.log("No Data for DBTableEditor");}
@@ -378,14 +391,17 @@ DBTableEditor.onload = function(opts){
     showHeaderRow: true,
     headerRowHeight: 30,
     defaultColumnWidth:120,
-    explicitInitialization: true
+    explicitInitialization: true,
+    autoHeight:DBTableEditor.autoHeight
   };
 
   DBTableEditor.columnFilters = jQuery.extend(DBTableEditor.columnFilters,DBTableEditor.query,DBTableEditor.hashQuery);
   delete(DBTableEditor.columnFilters["page"]);
   var dataView = DBTableEditor.dataView = new Slick.Data.DataView({ inlineFilters: true });
+  if(DBTableEditor.getItemMetadata)
+    DBTableEditor.dataView.getItemMetadata = DBTableEditor.getItemMetadata(DBTableEditor.dataView.getItemMetadata);
   var grid = DBTableEditor.grid = new Slick.Grid('.db-table-editor', dataView, columns, options);
-  grid.setSelectionModel(new Slick.CellSelectionModel());
+  //grid.setSelectionModel(new Slick.CellSelectionModel());
   var nextCell = function (args){
     if(!args) return;
     var ri = args.row === null ? rows.length-1 : args.row,
