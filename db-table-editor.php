@@ -3,7 +3,7 @@
 Plugin Name: DB-table-editor
 Plugin URI: http://github.com/AcceleratioNet/wp-db-table-editor
 Description: A plugin that adds "tools" pages to edit database tables
-Version: 1.2.2
+Version: 1.2.3
 Author: Russ Tyndall @ Acceleration.net
 Author URI: http://www.acceleration.net
 License: BSD
@@ -333,8 +333,8 @@ function dbte_save_cb() {
     $id=@$r[$idIdx];
     $up = array();
     for($i=0 ; $i < $len ; $i++) {
-      if($i != $idIdx){
-        $v = @$r[$i];
+      if($i != $idIdx && array_key_exists($i, $r)){
+        $v = $r[$i];
         $up[$cols[$i]] = $v;
       }
     }
@@ -441,7 +441,7 @@ function dbte_export_csv(){
     if(strpos($k, "filter-")===0){
       $k = str_replace('filter-','', $k);
       if($cur->auto_date && dbte_is_date($v)) $wheres[] = $wpdb->prepare("$k = %s", $v);
-      else $wheres[] = $wpdb->prepare("$k LIKE %s", '%'.$v.'%');
+      else $wheres[] = $wpdb->prepare("$tbl.$k LIKE %s", '%'.$v.'%');
       $filtered = true;
     }
   }
