@@ -11,6 +11,7 @@ if(typeof(DBTableEditor)=='undefined') DBTableEditor={};
 
 // based on https://github.com/brondavies/SlickGrid/commit/d5966858cd4f7591ba3da5789009b488ad05b021#diff-7f1ab5db3c0316e19a9ee635a1e2f2d0R1374
 DBTableEditor.defaultValueFormatter = function (row, cell, value, columnDef, dataContext) {
+  if(value == "0000-00-00 00:00:00") return null;
   var dv = DBTableEditor.toLocaleDate(value);
   //console.log(row, cell, value, columnDef, dv);
   if (value == null)return "";
@@ -88,7 +89,7 @@ DBTableEditor.save = function(){
     }
     r.item.modifiedIdxs = [r.cell-1];
     h[r.item.id] = r.item;
-    toSave.push(r.item);
+    toSave.push(jQuery.extend({}, r.item));
   }
   //console.log(toSave);
   var cols = DBTableEditor.data.columns.map(function(c){return c.originalName;});
@@ -465,7 +466,7 @@ DBTableEditor.onload = function(opts){
       var v = r[n];
       if(c.type == 'int') return Number(v);
       else if(c.id.search('date')>=0) return new Date(v);
-      return v && v.toLowerCase();
+      return v && v.toString().toLowerCase();
     };
     var rowSorter = function (r1, r2) {
       for (var c, i=0; c=cols[i]; i++) {
