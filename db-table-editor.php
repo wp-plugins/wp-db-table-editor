@@ -3,7 +3,7 @@
 Plugin Name: DB-table-editor
 Plugin URI: http://github.com/AcceleratioNet/wp-db-table-editor
 Description: A plugin that adds "tools" pages to edit database tables
-Version: 1.3
+Version: 1.3.1
 Author: Russ Tyndall @ Acceleration.net
 Author URI: http://www.acceleration.net
 License: BSD
@@ -42,7 +42,12 @@ global $DBTE_INSTANCES, $DBTE_CURRENT;
 $DBTE_INSTANCES = Array();
 $DBTE_CURRENT = null;
 
+include('SplClassLoader.php');
+$loader = new SplClassLoader('PHPSQL', 'php-sql-parser/src/');
+$loader->register();
 include('DBTableEditor.class.php');
+
+
 
 /* TODO: could be used to pull current config from the db if needed
 add_action('plugins_loaded','db_table_editor_init');
@@ -454,6 +459,7 @@ function dbte_export_csv(){
       $filtered = true;
     }
   }
+
   $title = $cur->title;
   if($filtered) $title .= '-filtered';
   $data = $cur->getData(array("where"=>$wheres));
