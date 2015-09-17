@@ -3,7 +3,7 @@
 Plugin Name: DB-table-editor
 Plugin URI: http://github.com/AcceleratioNet/wp-db-table-editor
 Description: A plugin that adds "tools" pages to edit database tables
-Version: 1.4.2
+Version: 1.5.0
 Author: Russ Tyndall @ Acceleration.net
 Author URI: http://www.acceleration.net
 Text Domain: wp-db-table-editor
@@ -232,14 +232,22 @@ function dbte_render($id=null){
     <button onclick="DBTableEditor.undo();"><img src="$base/assets/images/arrow_undo.png" align="absmiddle">$undoButtonLabel</button>
 EOT;
   }
+  $dataUrl = null;
+  if($cur->ajax_data){
+      $dataUrl = admin_url( 'admin-ajax.php')."?".$_SERVER["QUERY_STRING"]
+               .'&action=dbte_data&table='.$cur->id;
+  }
+           
   $args = Array(
     "baseUrl"=>$base,
-    "data"=>dbte_get_data_table(),
+    "data" => $cur->ajax_data ? null : dbte_get_data_table(),
+    "dataUrl" => $dataUrl
   );
   // copy all DBTE slots to the json array
   foreach($cur as $k => $v) { $args[$k] = $v; }
   unset($args['sql']);
   $json = json_encode($args);
+  $loadingLabel = __('Loading data...', 'wp-db-table-editor');
   $exportButtonLabel = __('Export to CSV', 'wp-db-table-editor');
   $clearFiltersButtonLabel = __('Clear Filters', 'wp-db-table-editor');
   $rowCountLabel = __('Showing 0 of 0 rows', 'wp-db-table-editor');
@@ -248,6 +256,12 @@ EOT;
   <div class="dbte-page">
     <h1>$cur->title</h1>
     $pendingSaveHeader
+    <span class="status">
+      <span class="loading" style="display:none;">
+        <img src="$base/assets/images/loading.gif" />
+        $loadingLabel
+      </span>
+      <span class="text"></span></span>
     <div class="db-table-editor-buttons">
     <button class="export" onclick="DBTableEditor.exportCSV();"><img src="$base/assets/images/download.png" align="absmiddle">$exportButtonLabel</button>
     <button class="clear" onclick="DBTableEditor.clearFilters();">
@@ -333,6 +347,26 @@ EOT;
   echo "</ul>";
 }
 
+add_action( 'wp_ajax_dbte_data', 'dbte_get_data' );
+add_action( 'wp_ajax_no_priv_dbte_data', 'dbte_get_data' );
+function dbte_get_data(){
+  $tbl= $_REQUEST['table'];
+  $cur = dbte_current($tbl);
+  if(!$cur) return;
+  $cap = $cur->cap;
+  // shouldnt be null, but lets be defensive
+  if(!$cap) $cap = 'edit_others_posts';
+  if(!current_user_can($cap)){
+      header('HTTP/1.0 403 Forbidden');
+      echo 'You are forbidden!';
+      die();
+  }
+  $data = dbte_get_data_table();
+  header('Content-type: application/json');
+  echo json_encode($data);
+  die(); 
+}
+
 /*
  * Ajax Save Handler, called with json rows/columns data
  */
@@ -379,7 +413,25 @@ function dbte_save_cb() {
     if($no_edit_cols) foreach($no_edit_cols as $noedit){
       unset($up[$noedit]);
     }
-    if($id != null){
+
+
+    if($cur->save_cb){
+        $isinsert = $id===null;
+        $data = Array('table'=>$cur,
+                      'update'=>$up,
+                      'columns'=>$cols,
+                      'indexes'=>$idxs[$ridx],
+                      'id'=>$id,
+                      'isinsert'=>$isinsert);
+        call_user_func_array($cur->save_cb, array(&$data));
+        if($isinsert && $data['id']){
+            $ids= Array('rowId'=>@$r["id"], 'dbid'=>$wpdb->insert_id);
+            if(!@$ids['rowId']) $ids['rowId'] = @$r["rowId"];
+            $new_ids[] = $ids;
+        }
+        do_action('dbte_row_saved', array(&$data));
+    }
+    else if($id != null){
       if($cur->update_cb){
         call_user_func($cur->update_cb,$cur, $up, $cols, $idxs[$ridx], $id);
       }
